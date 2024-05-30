@@ -5,50 +5,25 @@ from math import ceil
 import threading
 import time
 import os
-from pathlib import Path
-import zipfile
-
-# Function to download a single video
-def Download(link):
-    youtubeObject = YouTube(link)
-    youtubeObject = youtubeObject.streams.get_highest_resolution()
-    try:
-        youtubeObject.download(output_path="downloads")
-    except Exception as e:
-        print(f"An error has occurred: {e}")
-    print("Download is completed successfully")
+import shutil
+from zipfile import ZipFile
 
 # Define the main function to encapsulate the Streamlit app
 def main():
     # Title of the Streamlit app
     st.title("YouTube Downloader")
 
-    # Single video downloader
-    st.subheader("Download a Single Video")
-    video_url = st.text_input("Enter YouTube Video URL:")
-    
-    if st.button("Download Video"):
-        if video_url:
-            try:
-                Download(video_url)
-                st.success("Video downloaded successfully!")
-                video_path = next(Path("downloads").iterdir())
-                with open(video_path, "rb") as f:
-                    st.download_button(
-                        label="Download Video",
-                        data=f,
-                        file_name=video_path.name,
-                        mime="video/mp4"
-                    )
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
-        else:
-            st.error("Please enter a valid URL.")
+    # Radio button to select between downloading a playlist or a single video
+    option = st.radio("Select option:", ("Download Playlist", "Download Single Video"))
 
-    st.write("---")
+    if option == "Download Playlist":
+        download_playlist()
+    elif option == "Download Single Video":
+        download_single_video()
 
-    # Playlist downloader
-    st.subheader("Download a Playlist")
+# Function to download a YouTube playlist
+def download_playlist():
+    # Input field to enter the Playlist URL
     playlist_url = st.text_input("Enter Playlist URL:")
 
     # Button to start processing the playlist
@@ -81,26 +56,29 @@ def main():
             # Shared dictionary to store download status
             download_status = {"completed": [0] * len(link_chunks), "total": len(link_chunks)}
 
-            # Create a directory to store downloaded videos
-            download_dir = Path("downloads")
-            download_dir.mkdir(exist_ok=True)
-
             # Function to download videos in a given list of links
-            def downloader(link_chunk, thread_index):
+            def downloader(link_chunk, thread_index, download_dir):
                 completed = 0
                 for url in link_chunk:
                     try:
-                        Download(url)
+                        yt = YouTube(url)
+                        ys = yt.streams.get_highest_resolution()
+                        ys.download(download_dir)
                         completed += 1
                     except Exception as e:
                         pass
                 download_status["completed"][thread_index] = completed
 
+            # Create a temporary directory for downloads
+            download_dir = "downloads"
+            if not os.path.exists(download_dir):
+                os.makedirs(download_dir)
+
             # Creating and starting threads
             threads = []
             for i in range(4):
                 if i < len(link_chunks):
-                    t = threading.Thread(target=downloader, args=(link_chunks[i], i), name=f'd{i+1}')
+                    t = threading.Thread(target=downloader, args=(link_chunks[i], i, download_dir), name=f'd{i+1}')
                     threads.append(t)
                     t.start()
 
@@ -117,24 +95,47 @@ def main():
             for t in threads:
                 t.join()
 
-            st.write("Download complete!")
+            # Zip the downloaded files
+            zip_filename = "playlist_download.zip"
+            with ZipFile(zip_filename, 'w') as zipf:
+                for foldername, subfolders, filenames in os.walk(download_dir):
+                    for filename in filenames:
+                        filepath = os.path.join(foldername, filename)
+                        zipf.write(filepath, os.path.relpath(filepath, download_dir))
 
-            # Zip the downloaded videos
-            zip_path = download_dir / "videos.zip"
-            with zipfile.ZipFile(zip_path, 'w') as zipf:
-                for video_file in download_dir.iterdir():
-                    if video_file.is_file():
-                        zipf.write(video_file, video_file.name)
-            
-            # Provide download link for the zip file
-            with open(zip_path, "rb") as f:
-                st.download_button(
-                    label="Download Videos",
-                    data=f,
-                    file_name="videos.zip",
-                    mime="application/zip"
-                )
+            # Provide a download link for the zip file
+            st.write("Download complete! Click below to download the zip file.")
+            with open(zip_filename, "rb") as f:
+                st.download_button(label="Download ZIP", data=f, file_name=zip_filename)
 
+            # Clean up temporary files
+            shutil.rmtree(download_dir)
+            os.remove(zip_filename)
+
+        except Exception as e:
+            # Handle errors and display them
+            st.error("An error occurred: " + str(e))
+
+# Function to download a single YouTube video
+def download_single_video():
+    # Input field to enter the video URL
+    video_url = st.text_input("Enter Video URL:")
+
+    # Button to start downloading the video
+    if st.button("Download Video"):
+        try:
+            # Create a YouTube object from the provided URL
+            yt = YouTube(video_url)
+            # Get the highest resolution stream
+            ys = yt.streams.get_highest_resolution()
+            # Download the video
+            download_dir = "downloads"
+            if not os.path.exists(download_dir):
+                os.makedirs(download_dir)
+            ys.download(download_dir)
+            st.write("Download complete! Click below to download the video.")
+            with open(os.path.join(download_dir, ys.default_filename), "rb") as f:
+                st.download_button(label="Download Video", data=f, file_name=ys.default_filename)
         except Exception as e:
             # Handle errors and display them
             st.error("An error occurred: " + str(e))
@@ -142,4 +143,3 @@ def main():
 # Run the main function
 if __name__ == "__main__":
     main()
-

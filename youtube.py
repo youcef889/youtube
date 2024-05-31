@@ -5,7 +5,7 @@ from math import ceil
 import threading
 import time
 import os
-import shutil
+from io import BytesIO
 from zipfile import ZipFile
 
 # Define the main function to encapsulate the Streamlit app
@@ -26,11 +26,15 @@ def download_playlist():
     # Input field to enter the Playlist URL
     playlist_url = st.text_input("Enter Playlist URL:")
 
+    # Dropdown to select resolution
+    resolution = st.selectbox("Select resolution:", ("Highest", "720p", "480p", "360p", "Audio Only"))
+
     # Button to start processing the playlist
     if st.button("Download Playlist"):
         # Attempt to create a Playlist object from the provided URL
         try:
             p = Playlist(playlist_url)
+
             # Display playlist information
             st.write(f"**Playlist Name**: {p.title}")
             st.write(f"**Channel Name**: {p.owner}")
@@ -52,33 +56,44 @@ def download_playlist():
             # Track download progress
             progress_bars = [st.progress(0) for _ in range(len(link_chunks))]
             status_texts = [st.empty() for _ in range(len(link_chunks))]
-
             # Shared dictionary to store download status
             download_status = {"completed": [0] * len(link_chunks), "total": len(link_chunks)}
 
+            total_size = 0
+            start_time = time.time()
+
             # Function to download videos in a given list of links
-            def downloader(link_chunk, thread_index, download_dir):
+            def downloader(link_chunk, thread_index):
+                nonlocal total_size
                 completed = 0
+                video_files = []
                 for url in link_chunk:
                     try:
                         yt = YouTube(url)
-                        ys = yt.streams.get_highest_resolution()
-                        ys.download(download_dir)
+                        if resolution == "Highest":
+                            ys = yt.streams.get_highest_resolution()
+                        elif resolution == "Audio Only":
+                            ys = yt.streams.get_audio_only()
+                        else:
+                            ys = yt.streams.filter(res=resolution).first()
+
+                        video_bytes = BytesIO()
+                        ys.stream_to_buffer(video_bytes)
+                        video_bytes.seek(0)
+                        video_files.append((ys.default_filename, video_bytes))
+                        total_size += len(video_bytes.getvalue())
                         completed += 1
                     except Exception as e:
-                        pass
+                        st.error(f"Error downloading {url}: {e}")
                 download_status["completed"][thread_index] = completed
+                return video_files
 
-            # Create a temporary directory for downloads
-            download_dir = "downloads"
-            if not os.path.exists(download_dir):
-                os.makedirs(download_dir)
-
-            # Creating and starting threads
+            # Create and start threads for downloading
             threads = []
+            video_files_list = []
             for i in range(4):
                 if i < len(link_chunks):
-                    t = threading.Thread(target=downloader, args=(link_chunks[i], i, download_dir), name=f'd{i+1}')
+                    t = threading.Thread(target=lambda q, arg1: q.append(downloader(*arg1)), args=(video_files_list, (link_chunks[i], i)))
                     threads.append(t)
                     t.start()
 
@@ -95,22 +110,23 @@ def download_playlist():
             for t in threads:
                 t.join()
 
-            # Zip the downloaded files
-            zip_filename = "playlist_download.zip"
-            with ZipFile(zip_filename, 'w') as zipf:
-                for foldername, subfolders, filenames in os.walk(download_dir):
-                    for filename in filenames:
-                        filepath = os.path.join(foldername, filename)
-                        zipf.write(filepath, os.path.relpath(filepath, download_dir))
+            end_time = time.time()
+            total_time = end_time - start_time
+
+            # Create zip file in memory
+            zip_buffer = BytesIO()
+            with ZipFile(zip_buffer, 'w') as zipf:
+                for video_files in video_files_list:
+                    for filename, video_bytes in video_files:
+                        zipf.writestr(filename, video_bytes.getvalue())
+            zip_buffer.seek(0)
 
             # Provide a download link for the zip file
             st.write("Download complete! Click below to download the zip file.")
-            with open(zip_filename, "rb") as f:
-                st.download_button(label="Download ZIP", data=f, file_name=zip_filename)
+            st.download_button(label="Download ZIP", data=zip_buffer, file_name="playlist_download.zip", mime="application/zip")
 
-            # Clean up temporary files
-            shutil.rmtree(download_dir)
-            os.remove(zip_filename)
+            # Display download statistics
+            download_statistics(total_size, total_time)
 
         except Exception as e:
             # Handle errors and display them
@@ -121,25 +137,53 @@ def download_single_video():
     # Input field to enter the video URL
     video_url = st.text_input("Enter Video URL:")
 
+    # Dropdown to select resolution
+    resolution = st.selectbox("Select resolution:", ("Highest", "720p", "480p", "360p", "Audio Only"))
+
     # Button to start downloading the video
     if st.button("Download Video"):
         try:
+            start_time = time.time()
+
             # Create a YouTube object from the provided URL
             yt = YouTube(video_url)
             # Get the highest resolution stream
-            ys = yt.streams.get_highest_resolution()
-            # Download the video
-            download_dir = "downloads"
-            if not os.path.exists(download_dir):
-                os.makedirs(download_dir)
-            ys.download(download_dir)
+            if resolution == "Highest":
+                ys = yt.streams.get_highest_resolution()
+            elif resolution == "Audio Only":
+                ys = yt.streams.get_audio_only()
+            else:
+                ys = yt.streams.filter(res=resolution).first()
+
+            # Download the video to a BytesIO buffer
+            video_bytes = BytesIO()
+            ys.stream_to_buffer(video_bytes)
+            video_bytes.seek(0)
+
+            end_time = time.time()
+            total_size = len(video_bytes.getvalue())
+            total_time = end_time - start_time
+
+            # Provide the video file as a download link
             st.write("Download complete! Click below to download the video.")
-            with open(os.path.join(download_dir, ys.default_filename), "rb") as f:
-                st.download_button(label="Download Video", data=f, file_name=ys.default_filename)
+            st.download_button(label="Download Video", data=video_bytes, file_name=ys.default_filename)
+
+            # Display download statistics
+            download_statistics(total_size, total_time)
+
         except Exception as e:
             # Handle errors and display them
             st.error("An error occurred: " + str(e))
 
+# Function to display download statistics
+def download_statistics(total_size, total_time):
+    st.write("### Download Statistics")
+    st.write(f"**Total Download Size**: {total_size / (1024 * 1024):.2f} MB")
+    st.write(f"**Total Download Time**: {total_time:.2f} seconds")
+    if total_time > 0:
+        st.write(f"**Average Download Speed**: {total_size / (1024 * 1024) / total_time:.2f} MB/s")
+
 # Run the main function
 if __name__ == "__main__":
     main()
+

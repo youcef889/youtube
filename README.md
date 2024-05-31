@@ -8,6 +8,11 @@ This is a Streamlit application that allows users to download YouTube playlists.
 - Multithreading support for faster downloads.
 - Progress bars to monitor the download process.
 - Download videos as a zip file.
+## New Features Added:
+  -Audio Only Option:
+  -Improved Error Handling:
+  -Download Statistics:
+
 ## Getting Started
 
 ### Clone the Repository
@@ -15,4 +20,6 @@ This is a Streamlit application that allows users to download YouTube playlists.
 ```sh
 git clone https://github.com/youcef889/youtube.git
 cd youtube
+docker build -t youtube-playlist-downloader .
+docker run  --publish 8501:8501 --detach --name  youtube-playlist-downloader youtube-playlist-downloader
 

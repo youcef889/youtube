@@ -8,10 +8,12 @@ This is a Streamlit application that allows users to download YouTube playlists.
 - Multithreading support for faster downloads.
 - Progress bars to monitor the download process.
 - Download videos as a zip file.
+
 ## New Features Added:
-  -Audio Only Option.
-  -Improved Error Handling.
-  -Download Statistics.
+
+- Audio Only Option.
+- Improved Error Handling.
+- Download Statistics.
 
 ## Getting Started
 
